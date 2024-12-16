@@ -30,7 +30,7 @@ extern bool ffmpeg_decode_audio(const std::string & ifname, std::vector<uint8_t>
 #endif
 
 // Function to check if the next argument exists
-static std::string get_next_arg(int& i, int argc, char** argv, const std::string& flag, gpt_params& params) {
+std::string get_next_arg(int& i, int argc, char** argv, const std::string& flag, gpt_params& params) {
     if (i + 1 < argc && argv[i + 1][0] != '-') {
         return argv[++i];
     } else {
@@ -147,6 +147,7 @@ std::string gpt_random_prompt(std::mt19937 & rng) {
         case 7: return "He";
         case 8: return "She";
         case 9: return "They";
+        default: return "To";
     }
 
     return "The";
@@ -262,6 +263,92 @@ std::map<std::string, int32_t> json_parse(const std::string & fname) {
     return result;
 }
 
+std::map<std::string, std::string> json_parse_from_string(const std::string json) {
+    std::map<std::string, std::string> result;
+
+    // parse json
+    {
+        bool has_key  = false;
+        bool in_token = false;
+
+        std::string str_key = "";
+        std::string str_val = "";
+
+        int n = json.size();
+        for (int i = 1; i < n; ++i) {
+            if (!in_token) {
+                if (json[i] == ' ') continue;
+                if (json[i] == '"') {
+                    in_token = true;
+                    continue;
+                }
+            } else {
+                if (json[i] == '\\' && i+1 < n) {
+                    if (has_key == false) {
+                        str_key += json[i];
+                    } else {
+                        str_val += json[i];
+                    }
+                    ++i;
+                } else if (json[i] == '"') {
+                    if (has_key == false) {
+                        has_key = true;
+                        ++i;
+                        while (json[i] == ' ') ++i;
+                        ++i; // :
+                        while (json[i] == ' ') ++i;
+                        if (json[i] != '\"') {
+                            while (json[i] != ',' && json[i] != '}') {
+                                str_val += json[i++];
+                            }
+                            has_key = false;
+                        } else {
+                            in_token = true;
+                            continue;
+                        }
+                    } else {
+                        has_key = false;
+                    }
+
+                    str_key = ::replace(str_key, "\\u0120", " " ); // \u0120 -> space
+                    str_key = ::replace(str_key, "\\u010a", "\n"); // \u010a -> new line
+                    str_key = ::replace(str_key, "\\\"",    "\""); // \\\"   -> "
+
+                    try {
+                        result[str_key] = str_val;
+                    } catch (...) {
+                        //fprintf(stderr, "%s: ignoring key '%s' with value '%s'\n", fname.c_str(), str_key.c_str(), str_val.c_str());
+
+                    }
+                    str_key = "";
+                    str_val = "";
+                    in_token = false;
+                    continue;
+                }
+                if (has_key == false) {
+                    str_key += json[i];
+                } else {
+                    str_val += json[i];
+                }
+            }
+        }
+    }
+
+    return result;
+}
+
+std::string json_serialize_to_string(const std::map<std::string, std::string>& json_map) {
+    std::string json_string = "{";
+    for (auto it = json_map.begin(); it != json_map.end(); ++it) {
+        json_string += "\"" + it->first + "\":\"" + it->second + "\"";
+        if (std::next(it) != json_map.end()) {
+            json_string += ",";
+        }
+    }
+    json_string += "}";
+    return json_string;
+}
+
 std::string convert_to_utf8(const std::wstring & input) {
     std::wstring_convert<std::codecvt_utf8<wchar_t>> converter;
     return converter.to_bytes(input);
@@ -345,7 +432,7 @@ std::vector<gpt_vocab::id> gpt_tokenize(const gpt_vocab & vocab, const std::stri
     return tokens;
 }
 
-static std::vector<gpt_vocab::id> parse_tokens_from_string(const std::string& input, char delimiter) {
+std::vector<gpt_vocab::id> parse_tokens_from_string(const std::string& input, char delimiter) {
     std::vector<gpt_vocab::id> output;
     std::stringstream ss(input);
     std::string token;
@@ -357,7 +444,7 @@ static std::vector<gpt_vocab::id> parse_tokens_from_string(const std::string& in
     return output;
 }
 
-static std::map<std::string, std::vector<gpt_vocab::id>> extract_tests_from_file(const std::string & fpath_test){
+std::map<std::string, std::vector<gpt_vocab::id>> extract_tests_from_file(const std::string & fpath_test){
     if (fpath_test.empty()){
         fprintf(stderr, "%s : No test file found.\n", __func__);
         return std::map<std::string, std::vector<gpt_vocab::id>>();
