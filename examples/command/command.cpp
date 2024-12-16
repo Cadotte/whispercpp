@@ -25,11 +25,28 @@
 #include <iostream>
 #include <thread>
 #include <atomic>
+#include <mutex>
 
-// for listening activation/deactivation state monitoring through stdin
+// for listening and test sates activation/deactivation state monitoring through stdin
 std::atomic<bool> inputAvailable(false);
 std::atomic<bool> listeningState(false);
 std::atomic<bool> testState(false);
+
+// For logs folder path
+std::string logs_folder_shared;
+std::mutex logs_folder_mutex;
+
+// Function to safely set the value of the shared string
+void set_logs_folder(const std::string& new_value) {
+    std::lock_guard<std::mutex> lock(logs_folder_mutex);
+    logs_folder_shared = new_value;
+}
+
+// Function to safely get the value of the shared string
+std::string get_logs_folder() {
+    std::lock_guard<std::mutex> lock(logs_folder_mutex);
+    return logs_folder_shared;
+}
 
 // command-line parameters
 struct whisper_params {
@@ -553,6 +570,8 @@ int always_prompt_transcription(struct whisper_context * ctx, audio_async & audi
 // Monitor stdin for signals
 void inputThread() {
     std::string inputBuffer;
+    std::map<std::string, std::string> input_json;
+    std::string status_event;
     while (true)
     {
         // fprintf(stderr, "input thread running\n");
@@ -560,20 +579,32 @@ void inputThread() {
         inputAvailable = true;
         // fprintf(stderr, "got something in stdin\n");
         // fprintf(stderr, "inputBuffer:%s \n", inputBuffer.c_str());
-        if (inputBuffer == "a") {
-            listeningState = true;
-            fprintf(stderr, "listening state:%s \n", listeningState ? "true" : "false");
-        } else if (inputBuffer == "d") {
-            listeningState = false;
-            fprintf(stderr, "listening state:%s \n", listeningState ? "true" : "false");
-        }
-        else if (inputBuffer == "t") {
-            testState = true;
-            fprintf(stderr, "test state:%s \n", testState ? "true" : "false");
-        }
-        else if (inputBuffer == "n") {
-            testState = false;
-            fprintf(stderr, "test state:%s \n", testState ? "true" : "false");
+
+        input_json = json_parse_from_string(inputBuffer);
+
+        if (input_json.find("status_event") != input_json.end()) {
+
+            status_event = input_json["status_event"];
+
+            if (status_event == "awoken") {
+                listeningState = true;
+                fprintf(stderr, "listening state:%s \n", listeningState ? "true" : "false");
+            } else if (status_event == "asleep") {
+                listeningState = false;
+                fprintf(stderr, "listening state:%s \n", listeningState ? "true" : "false");
+            }
+            else if (status_event == "test") {
+                testState = true;
+                fprintf(stderr, "test state:%s \n", testState ? "true" : "false");
+                if (input_json.find("logs_folder") != input_json.end()) {
+                    std::string logs_folder = input_json["logs_folder"];
+                    set_logs_folder(logs_folder);
+                }
+            }
+            else if (status_event == "normal") {
+                testState = false;
+                fprintf(stderr, "test state:%s \n", testState ? "true" : "false");
+            }
         }
 
 
@@ -608,12 +639,11 @@ int process_general_transcription(struct whisper_context * ctx, audio_async & au
 
     fprintf(stderr, "\n");
     fprintf(stderr, "%s: general-purpose mode\n", __func__);
-    fprintf(stdout, "\n");
-    fprintf(stdout, "INITIALIZED\n");
+    // fprintf(stdout, "\n");
+    fprintf(stdout, "{\"status_event\":\"initialized\"}\n");
     fflush(stdout);
 
     bool is_listening = false;
-    int counter = 0; // Initialize the counter
     wav_writer wavWriter;
 
     // start input thread
@@ -627,14 +657,6 @@ int process_general_transcription(struct whisper_context * ctx, audio_async & au
 
         // delay
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
-
-        // Increment and print the counter
-        counter++;
-        // Print the counter every increment of 10
-        if (counter % 10 == 0) {
-            fprintf(stdout, "Counter: %d\n", counter);
-            fflush(stdout);
-        }
 
         if (listeningState == true) {
             if (is_listening == false) {
@@ -654,7 +676,7 @@ int process_general_transcription(struct whisper_context * ctx, audio_async & au
 
             if (::vad_simple(pcmf32_cur, WHISPER_SAMPLE_RATE, 1000, params.vad_thold, params.freq_thold, params.print_energy)) {
 
-                fprintf(stdout, "PROCESSING\n");
+                fprintf(stdout, "{\"status_event\":\"processing\"}\n");
                 fflush(stdout);
 
                 int64_t t_ms = 0;
@@ -663,20 +685,34 @@ int process_general_transcription(struct whisper_context * ctx, audio_async & au
 
                 const auto txt = ::trim(::transcribe(ctx, params, pcmf32_cur, "root", logprob_min, logprob_sum, n_tokens, t_ms));
 
-                const std::string command = txt;
+                const std::string transcription = txt;
 
-                fprintf(stdout, "COMMAND:%s \n", command.c_str());
-                fflush(stdout);
+                std::map<std::string, std::string> transcription_json;
 
                 if(testState == true){
                     std::time_t t = std::time(nullptr);
                     char timestamp[100];
                     std::strftime(timestamp, sizeof(timestamp), "%Y-%m-%d %H:%M:%S", std::localtime(&t));
-                    std::string filename = "logs/" + std::string(timestamp) + ".wav";
-                    wavWriter.open(filename, WHISPER_SAMPLE_RATE, 16, 1);
+                    std::string file_name = std::string(timestamp) + ".wav";
+                    std::string logs_folder = get_logs_folder();
+                    std::string filepath = logs_folder + "/" + file_name;
+                    wavWriter.open(filepath, WHISPER_SAMPLE_RATE, 16, 1);
                     wavWriter.write(pcmf32_cur.data(), pcmf32_cur.size());
                     wavWriter.close();
+                    transcription_json = 
+                                            {
+                                                {"file_name", file_name},   
+                                                {"transcription", transcription}      
+                                            };
                 }
+                else {
+                    transcription_json = {{"transcription", transcription}};
+                }
+
+                std::string transcription_json_string = json_serialize_to_string(transcription_json);
+                fprintf(stdout, "%s\n", transcription_json_string.c_str());
+                // fprintf(stdout, "{\"transcription\":\"%s\"}\n", transcription.c_str());
+                fflush(stdout);
                 
                 audio.clear();
             }
