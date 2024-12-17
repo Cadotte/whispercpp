@@ -599,6 +599,7 @@ void inputThread() {
                 if (input_json.find("logs_folder") != input_json.end()) {
                     std::string logs_folder = input_json["logs_folder"];
                     set_logs_folder(logs_folder);
+                    fprintf(stderr, "Logs folder: %s\n", __func__);
                 }
             }
             else if (status_event == "normal") {
@@ -695,7 +696,7 @@ int process_general_transcription(struct whisper_context * ctx, audio_async & au
                     std::strftime(timestamp, sizeof(timestamp), "%Y-%m-%d %H:%M:%S", std::localtime(&t));
                     std::string file_name = std::string(timestamp) + ".wav";
                     std::string logs_folder = get_logs_folder();
-                    std::string filepath = logs_folder + "/" + file_name;
+                    std::string filepath = logs_folder + "\" + file_name;
                     wavWriter.open(filepath, WHISPER_SAMPLE_RATE, 16, 1);
                     wavWriter.write(pcmf32_cur.data(), pcmf32_cur.size());
                     wavWriter.close();
