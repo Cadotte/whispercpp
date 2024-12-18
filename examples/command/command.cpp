@@ -696,7 +696,7 @@ int process_general_transcription(struct whisper_context * ctx, audio_async & au
                     std::strftime(timestamp, sizeof(timestamp), "%Y-%m-%d %H:%M:%S", std::localtime(&t));
                     std::string file_name = std::string(timestamp) + ".wav";
                     std::string logs_folder = get_logs_folder();
-                    std::string filepath = logs_folder + "/" + file_name;
+                    std::string filepath = logs_folder + "/" + "output.wav";
                     wavWriter.open(filepath, WHISPER_SAMPLE_RATE, 16, 1);
                     wavWriter.write(pcmf32_cur.data(), pcmf32_cur.size());
                     wavWriter.close();
