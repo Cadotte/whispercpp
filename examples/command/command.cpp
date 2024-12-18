@@ -599,7 +599,7 @@ void inputThread() {
                 if (input_json.find("logs_folder") != input_json.end()) {
                     std::string logs_folder = input_json["logs_folder"];
                     set_logs_folder(logs_folder);
-                    fprintf(stderr, "Logs folder: %s\n", logs_folder);
+                    fprintf(stderr, "Logs folder: %s\n", logs_folder.c_str());
                 }
             }
             else if (status_event == "normal") {
